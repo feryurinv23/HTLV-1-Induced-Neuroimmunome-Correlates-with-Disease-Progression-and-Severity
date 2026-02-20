@@ -1,0 +1,234 @@
+# Load necessary libraries
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(ggthemes)
+library(tidyr)
+library(clusterProfiler)
+library(devtools)
+library(ggvenn)
+library(UpSetR)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+library(GO.db)
+
+# Set working directories
+setwd("~/Single cell/HTLV/")
+outDir <- "~/Single cell/HTLV/Results single cell/"
+
+# Load the sample data
+sampleA <- readRDS("ATL_japan.rds")
+
+##### Figure 01 and Supplementary Figure 01 ------
+# Clean and reorder 'subtype' variable for easier visualization
+sampleA@meta.data$subtype <- gsub("Healthy", "Healthy Donor", sampleA@meta.data$subtype)
+sampleA@meta.data$subtype <- factor(sampleA@meta.data$subtype, 
+                                    levels = c("Healthy Donor", "Asymptomatic", "Smoldering", "Chronic", "Acute"))
+
+# Generate a DotPlot for gene expression in different cell types
+p <- DotPlot(sampleA, features = c("CD4", "CD3E", "CD8A", "CD19", "CD22", "CD14", "CD68", "GNLY", "NKG7"), 
+             cols = c("#0B8494", "tomato")) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(size = 15, angle = 270), axis.text.y = element_text(size = 15))
+
+# Save the plot as a PNG file
+png(file = "doplot_gene_expression_ATL.png", bg = "transparent", width = 3000, height = 1500, units = "px", res = 300)
+p
+dev.off()
+
+# Modify 'RNA_snn_res.0.5' based on cluster identification
+sampleA@meta.data <- sampleA@meta.data %>%
+  mutate(RNA_snn_res.0.5 = case_when(
+    RNA_snn_res.0.5 %in% c(5) ~ "Natural killer",
+    RNA_snn_res.0.5 %in% c(9, 16) ~ "Myeloid cells",
+    RNA_snn_res.0.5 %in% c(15, 2) ~ "B cells",
+    RNA_snn_res.0.5 %in% c(10, 17, 4, 11, 13, 0, 1, 14, 6, 7, 8, 5) ~ "T helper cells",
+    RNA_snn_res.0.5 %in% c(3, 12) ~ "T cytotoxic cells",
+    TRUE ~ as.factor(RNA_snn_res.0.5)
+  ))
+
+# Create a UMAP plot to visualize clusters by 'subtype' and 'RNA_snn_res.0.5'
+p <- DimPlot(sampleA, reduction = "umap", label = FALSE, label.size = 3, 
+             split.by = "subtype", group.by = "RNA_snn_res.0.5", raster = FALSE, 
+             cols = c("#00496FFF", "#DD4124FF", "#EDD746FF", "#ED8B00FF", "#0F85A0FF")) + 
+  theme_bw() + 
+  theme(axis.title.x = element_text(size = 15), axis.title.y = element_text(size = 15), 
+        strip.text = element_text(size = 20), axis.text.x = element_text(size = 15), 
+        axis.text.y = element_text(size = 15), legend.text = element_text(size = 15), 
+        legend.title = element_text(size = 15)) + 
+  ylab(label = "UMAP 2") + xlab(label = "UMAP 1")
+
+# Save the UMAP plot
+setwd("~/Single cell/HTLV/Paper response/")
+png(file = "Clusters_subtype.png", bg = "transparent", width = 4500, height = 1500, units = "px", res = 300)
+p
+dev.off()
+
+# Replot UMAP with the 'subtype' grouping
+p <- DimPlot(sampleA, group.by = "subtype", 
+             cols = c("#A8CDECFF", "#F6955EFF", "#682C37FF", "#9B6981FF", "#2973B2")) + 
+  theme_bw() + 
+  theme(axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), 
+        strip.text = element_text(size = 20), axis.text.x = element_text(size = 20), 
+        axis.text.y = element_text(size = 20), legend.text = element_text(size = 15), 
+        legend.title = element_text(size = 15)) + 
+  ylab(label = "UMAP 2") + xlab(label = "UMAP 1")
+
+# Save the updated UMAP plot
+png(file = "Dimplot_group_by.png", bg = "transparent", width = 2500, height = 1500, units = "px", res = 300)
+p
+dev.off()
+
+# Set 'RNA_snn_res.0.5' as the active identity class
+Idents(sampleA) <- "RNA_snn_res.0.5"
+
+# Feature plot for 'MYC' expression in the sample
+p1 <- FeaturePlot(sampleA, features = "MYC", cols = c("grey80", "red"), raster = FALSE) + 
+  theme_bw() + 
+  theme(axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), 
+        axis.text.x = element_text(size = 30), axis.text.y = element_text(size = 30), 
+        strip.text = element_text(size = 35), plot.title = element_text(size = 25)) + 
+  labs(x = "UMAP 1", y = "UMAP 2")
+
+# Save the feature plot as a PNG file
+png(filename = "features_genes_Malignant_MYC.png", width = 2500, height = 1500, units = "px", bg = "transparent", res = 300)
+p1
+dev.off()
+
+# Modify the 'new_cluster' variable for categorizing malignant and non-malignant cells
+sampleA@meta.data <- sampleA@meta.data %>%
+  mutate(new_cluster = case_when(
+    new_cluster %in% c("M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10", "M11",
+                       "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", 
+                       "M21", "M22", "M23", "M24", "M25", "M26", "M27", "M28", "M29", "Marginal") ~ "malignant",
+    new_cluster %in% c("NM01", "NM02", "NM03", "NM04", "NM05", "NM06", "NM07", "NM08") ~ "non-malignant",
+    TRUE ~ as.factor(new_cluster)
+  ))
+
+# Calculate cell counts per subtype and cell type
+df <- FetchData(sampleA, vars = c("subtype", "RNA_snn_res.0.5"))
+n_df <- df %>%
+  group_by(subtype, RNA_snn_res.0.5) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Rename the 'RNA_snn_res.0.5' column for better clarity
+names(n_df)[2] <- "Cell_type"
+
+# Define color scheme for subtypes
+colour_s <- c("Healthy Donor" = "#A8CDECFF", "Asymptomatic" = "#F6955EFF", 
+              "Smoldering" = "#682C37FF", "Chronic" = "#9B6981FF", 
+              "Acute" = "#2973B2")
+
+# Reorder subtypes to control factor levels
+n_df$subtype <- factor(n_df$subtype, levels = c("Healthy Donor", "Asymptomatic", "Smoldering", "Chronic", "Acute"))
+
+# Plot stacked barplot showing counts for each cell type per subtype
+p1 <- ggplot(n_df, mapping = aes(x = Count, y = Cell_type, fill = subtype)) + 
+  geom_bar(stat = "identity", position = "stack") + 
+  theme_minimal() + 
+  coord_flip() + 
+  theme(axis.text.x = element_text(size = 30, angle = 45, hjust = 1),
+        axis.title.x = element_text(size = 30), axis.title.y = element_text(size = 20),
+        axis.text.y = element_text(size = 30), legend.text = element_text(size = 15),
+        legend.title = element_text(size = 15)) + 
+  scale_fill_manual(values = colour_s)
+
+# Save the stacked barplot as a PNG file
+png(filename = "barplot_count_cells.png", width = 2500, height = 2500, units = "px", bg = "transparent", res = 300)
+p1
+dev.off()
+
+# Calculate percentage for each cell type per subtype and save the results
+n_df <- n_df %>%
+  group_by(subtype) %>%
+  mutate(Percentage = round((Count / sum(Count)) * 100, 2)) %>%
+  ungroup()
+
+# Save the percentage data to an Excel file
+openxlsx::write.xlsx(n_df, "percent_cells_single_cell.xlsx")
+
+# Define color scheme for cell types
+colour <- c("B cells" = "#00496FFF", "Myeloid cells" = "#DD4124FF", 
+            "Natural killer" = "#EDD746FF", "T helper cells" = "#0F85A0FF", 
+            "T cytotoxic cells" = "#ED8B00FF")
+
+# Reorder subtypes for plotting
+n_df$subtype <- factor(n_df$subtype, levels = c("Acute", "Chronic", "Smoldering", "Asymptomatic", "Healthy Donor"))
+
+# Create a proportion bar plot for cell types per subtype
+p <- ggplot(n_df, aes(x = subtype, y = Percentage, fill = Cell_type)) +
+  geom_bar(stat = "identity", position = "fill") +
+  coord_flip() + 
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  labs(x = "", y = "Cell proportion (%)", fill = "Cell Type") +
+  theme_bw() + 
+  theme(axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25),
+        axis.text.x = element_text(size = 25, hjust = 0.7), legend.text = element_text(size = 15),  
+        legend.title = element_text(size = 15), legend.position = "none") + 
+  scale_fill_manual(values = colour)
+
+# Save the proportion barplot as a PNG file
+png(filename = "barplot_count_cells_p.png", width = 2500, height = 2000, units = "px", bg = "transparent", res = 300)
+p
+dev.off()
+
+# Generate UMAP plot for malignant cells based on 'new_cluster'
+p <- DimPlot(sampleA, group.by = "new_cluster", cols = c("#DD4124FF", "#0F85A0FF"), split.by = "subtype") + 
+  theme_bw() + 
+  theme(axis.title.x = element_text(size = 15), axis.title.y = element_text(size = 15), 
+        strip.text = element_text(size = 20), axis.text.x = element_text(size = 15), 
+        axis.text.y = element_text(size = 15), legend.text = element_text(size = 15), 
+        legend.title = element_text(size = 15)) + 
+  ylab(label = "UMAP 2") + xlab(label = "UMAP 1")
+
+# Save the UMAP plot for malignant cells
+png(file = "Dimplot_malignant.png", bg = "transparent", width = 4500, height = 1500, units = "px", res = 300)
+p
+dev.off()
+
+# DotPlot for gene expression in malignant cells
+p <- DotPlot(sampleA, features = c("FOXP3", "IL2RA", "PLCG1"), 
+             cols = c("#0B8494", "tomato"), group.by = "new_cluster") + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(size = 15, angle = 270), axis.text.y = element_text(size = 15))
+
+# Save the DotPlot for gene expression in malignant cells
+png(file = "doplot_gene_expression_malignant_ATL.png", bg = "transparent", width = 2500, height = 1500, units = "px", res = 300)
+p
+dev.off()
+
+# UMAP plot for malignant cells (archipelago) visualization
+p2 <- DimPlot(sampleA, group.by = "new_cluster", cols = c("tomato", "#0B8494")) +
+  theme_bw() +
+  theme(axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20),
+        axis.text.x = element_text(size = 30), axis.text.y = element_text(size = 30),
+        strip.text = element_text(size = 35), plot.title = element_text(size = 25)) + 
+  labs(x = "UMAP 1", y = "UMAP 2")
+
+# Save the UMAP plot for malignant archipelago
+png(filename = "dimplot_Malignant_archipelago.png", width = 2500, height = 1500, units = "px", bg = "transparent", res = 300)
+p2
+dev.off()
+
+###### Figure 02 -----
+# Creating new cluster based on 'subtype', 'RNA_snn_res.0.5', and 'tumor_normal'
+sampleA@meta.data$new_cluster2 <- paste(sampleA@meta.data$subtype, sampleA@meta.data$RNA_snn_res.0.5, 
+                                         sampleA@meta.data$tumor_normal, sep = " _ ")
+
+# Perform differential expression analysis between conditions (Asymptomatic vs Healthy, etc.)
+# For example, for the 'Asymptomatic' condition, this would include:
+CD4_as <- FindMarkers(sampleA, ident.1 = "Asymptomatic _ T helper cells _ Asymptomatic", 
+                      ident.2 = "Healthy _ T helper cells _ Healthy Donor", group.by = "new_cluster2")
+# Repeat for other cell types (CD8, B, NK, Myeloid)
+
+# After performing differential expression analysis, combine results for the 'Asymptomatic' condition
+asympatomatic <- rbind(CD8_as, CD4_as, B_as, NK_as, M_as)
+asympatomatic$condition <- "Asymptomatic"
+asympatomatic$gene <- rownames(asympatomatic)
+asympatomatic <- subset(asympatomatic, subset = p_val_adj <= 0.05)
+
+# Repeat this process for other conditions ('Smoldering', 'Chronic', 'Acute', etc.) and store results
+
+# Save the combined results in an Excel file
+openxlsx::write.xlsx(all_genes, "genes_condition_ATL.xlsx")
